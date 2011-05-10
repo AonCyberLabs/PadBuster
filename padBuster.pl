@@ -41,7 +41,7 @@ GetOptions( "log" => \my $logFiles,
             "interactive" => \my $interactive,
             "bruteforce" => \my $bruteForce,
             "randomize" => \my $randomize,
-            "ignorecontent" => \my $ignoreContent,
+            "ignoredistance=s" => \my $ignoreDistance,
             "usebody" => \my $useBody,
             "runafter=s" => \my $runAfter,
             "verbose" => \my $verbose);
@@ -85,6 +85,7 @@ Options:
 	 -cert [pkcs12:file:pass or pem:crt:key]: HTTPS client certificate
 	 -resume [Block Number]: Resume at this block number
 	 -randomize: Randomize brute force attempts (similar to Web.config bruter)
+	 -ignoredistance [Levenshtein distance]: Ignore responses with smaller distance
 	 -usebody: Use response body content for response analysis phase
 	 -runafter: Command to run after finished encryption (replaces XXX)
          -verbose: Be Verbose
@@ -303,12 +304,14 @@ if ($bruteForce)
 		   {
 			my $contentRealLength = length($content);
 			my $distance = levenshtein($content, $oracleCandidates{$oracleSignatures[0]});
-			if ($status >= 300 || $status < 400) {
-				myPrint("\nAttempt $bfAttempts - Status: $status - Content Length: $contentLength ($contentRealLength) - Distance: $distance - Location: $location\n$testUrl\n",0);
-			} else {
-				myPrint("\nAttempt $bfAttempts - Status: $status - Content Length: $contentLength ($contentRealLength) - Distance: $distance\n$testUrl\n",0);
+			if (!$ignoreDistance || $distance > $ignoreDistance) {
+				if ($status >= 300 || $status < 400) {
+					myPrint("\nAttempt $bfAttempts - Status: $status - Content Length: $contentLength ($contentRealLength) - Distance: $distance - Location: $location\n$testUrl\n",0);
+				} else {
+					myPrint("\nAttempt $bfAttempts - Status: $status - Content Length: $contentLength ($contentRealLength) - Distance: $distance\n$testUrl\n",0);
+				}
 			}
-			writeFile("Brute_Force_Attempt_".$bfAttempts.".txt", "URL: $testUrl\nPost Data: $testPost\nCookies: $testCookies\n\nStatus: $status\nLocation: $location\nContent-Length: $contentLength\nContent:\n$content");
+			writeFile("Brute_Force_Attempt_".$bfAttempts.".txt", "URL: $testUrl\nPost Data: $testPost\nCookies: $testCookies\n\nStatus: $status\nLocation: $location\nContent-Length: $contentLength ($contentRealLength)\nDistance: $distance\nContent:\n$content");
 		   }
 	   }
 	  }
