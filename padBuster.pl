@@ -420,7 +420,14 @@ if ($plainTextInput)
 	if($runAfter) {
 		myPrint("-------------------------------------------------------\n",0);	
 		$runAfter =~ s/XXX/$forgedBytes/g;
-		myPrint("Running: $runAfter",0);
+		open FILE, "<", "/proc/$$/cmdline";
+		my $cmdline = <FILE>;
+		$cmdline =~ s/\x00/ '/;
+		$cmdline =~ s/\x00/' '/cg;
+		$cmdline =~ s/ '$//;
+		close FILE;
+		myPrint("Pri: $cmdline",0);
+		myPrint("Run: $runAfter",0);
 		myPrint("-------------------------------------------------------\n",0);	
 		my $ret = system($runAfter);
 		myPrint("-------------------------------------------------------\n",0);	
