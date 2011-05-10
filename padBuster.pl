@@ -293,8 +293,13 @@ if ($bruteForce)
 		   }
 		   if ($#oracleSignatures >= 0 && !grep {$signatureData eq $_} @oracleSignatures)
 		   {
+			my $contentRealLength = length($content);
 			my $distance = levenshtein($content, $oracleCandidates{$oracleSignatures[0]});
-			myPrint("\nAttempt $bfAttempts - Status: $status - Content Length: $contentLength - Distance: $distance\n$testUrl\n",0);
+			if ($status >= 300 || $status < 400) {
+				myPrint("\nAttempt $bfAttempts - Status: $status - Content Length: $contentLength ($contentRealLength) - Distance: $distance - Location: $location\n$testUrl\n",0);
+			} else {
+				myPrint("\nAttempt $bfAttempts - Status: $status - Content Length: $contentLength ($contentRealLength) - Distance: $distance\n$testUrl\n",0);
+			}
 			writeFile("Brute_Force_Attempt_".$bfAttempts.".txt", "URL: $testUrl\nPost Data: $testPost\nCookies: $testCookies\n\nStatus: $status\nLocation: $location\nContent-Length: $contentLength\nContent:\n$content");
 		   }
 	   }
