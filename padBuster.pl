@@ -41,6 +41,7 @@ GetOptions( "log" => \my $logFiles,
             "bruteforce" => \my $bruteForce,
             "ignorecontent" => \my $ignoreContent,
             "usebody" => \my $useBody,
+            "runafter=s" => \my $runAfter,
             "verbose" => \my $verbose);
   
 print "\n+-------------------------------------------+\n";
@@ -81,6 +82,7 @@ Options:
 	 -proxyauth [username:password]: Proxy Authentication
 	 -resume [Block Number]: Resume at this block number
 	 -usebody: Use response body content for response analysis phase
+	 -runafter: Command to run after finished encryption (replaces XXX)
          -verbose: Be Verbose
          -veryverbose: Be Very Verbose (Debug Only)
          
@@ -370,7 +372,19 @@ myPrint("-------------------------------------------------------",0);
 myPrint("** Finished ***\n", 0);
 if ($plainTextInput)
 {
-	myPrint("[+] Encrypted value is: ".uri_escape($forgedBytes),0);
+	if (! $noEncodeOption)
+	{
+		$forgedBytes = uri_escape($forgedBytes);
+	}
+	myPrint("[+] Encrypted value is: $forgedBytes\n",0);
+
+	if($runAfter) {
+		myPrint("-------------------------------------------------------\n",0);	
+		$runAfter =~ s/XXX/$forgedBytes/g;
+		myPrint("Running: $runAfter",0);
+		myPrint("-------------------------------------------------------\n",0);	
+		system($runAfter);
+	}
 } 
 else
 {	
