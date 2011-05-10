@@ -192,6 +192,7 @@ my $ivBytes = substr($encryptedBytes, 0, $blockSize);
 # Declare some optional elements for storing the results of the first test iteration
 # to help the user if they don't know what the padding error looks like
 my %oracleGuesses;
+my %oracleCandidates;
 my @oracleSignatures = ();
 my %responseFileBuffer;
 
@@ -271,13 +272,13 @@ if ($bruteForce)
 		   # Issue the request
 		   my ($status, $content, $location, $contentLength) = makeRequest($method, $testUrl, $testPost, $testCookies);
 
-		   my $signatureData = "$status\t$contentLength\t$location";
-		   $useBody ? ($signatureData = "$status\t$contentLength\t$location\t$content") : "" ;
+		   my $signatureData = ($useBody) ? "$status\t$contentLength\t$location\t$content" : "$status\t$contentLength\t$location";
 
 		   if ($#oracleSignatures < 0)
 		   {
 			$b == 0 ? myPrint("[+] Starting response analysis...\n",0) : "";
 			$oracleGuesses{$signatureData}++;
+			$oracleCandidates{$signatureData} = $content;
 			$responseFileBuffer{$signatureData} = "Status: $status\nLocation: $location\nContent-Length: $contentLength\nContent:\n$content";
 			if ($b == 255)
 			{
@@ -292,7 +293,8 @@ if ($bruteForce)
 		   }
 		   if ($#oracleSignatures >= 0 && !grep {$signatureData eq $_} @oracleSignatures)
 		   {
-			myPrint("\nAttempt $bfAttempts - Status: $status - Content Length: $contentLength\n$testUrl\n",0);
+			my $distance = levenshtein($content, $oracleCandidates{$oracleSignatures[0]});
+			myPrint("\nAttempt $bfAttempts - Status: $status - Content Length: $contentLength - Distance: $distance\n$testUrl\n",0);
 			writeFile("Brute_Force_Attempt_".$bfAttempts.".txt", "URL: $testUrl\nPost Data: $testPost\nCookies: $testCookies\n\nStatus: $status\nLocation: $location\nContent-Length: $contentLength\nContent:\n$content");
 		   }
 	   }
@@ -1010,5 +1012,32 @@ sub getTime {
  } else {
   return $hour.":".$minute.":".$second;
  }
+}
+
+# Levenshtein distance (also called edit distance) between two strings
+sub levenshtein($$){
+  my @A=split //, lc shift;
+  my @B=split //, lc shift;
+  my @W=(0..@B);
+  my ($i, $j, $cur, $next);
+  for $i (0..$#A){
+	$cur=$i+1;
+	for $j (0..$#B){
+		$next=min(
+			$W[$j+1]+1,
+			$cur+1,
+			($A[$i] ne $B[$j])+$W[$j]
+		);
+		$W[$j]=$cur;
+		$cur=$next;
+	}
+	$W[@B]=$next;
+  }
+  return $next;
+}
+
+sub min($$$){
+  if ($_[0] < $_[2]){ pop @_; } else { shift @_; }
+  return $_[0] < $_[1]? $_[0]:$_[1];
 }
 
