@@ -40,6 +40,7 @@ GetOptions( "log" => \my $logFiles,
             "resume=s" => \my $resumeBlock,
             "interactive" => \my $interactive,
             "bruteforce" => \my $bruteForce,
+            "randomize" => \my $randomize,
             "ignorecontent" => \my $ignoreContent,
             "usebody" => \my $useBody,
             "runafter=s" => \my $runAfter,
@@ -83,6 +84,7 @@ Options:
 	 -proxyauth [username:password]: Proxy Authentication
 	 -cert [pkcs12:file:pass or pem:crt:key]: HTTPS client certificate
 	 -resume [Block Number]: Resume at this block number
+	 -randomize: Randomize brute force attempts (similar to Web.config bruter)
 	 -usebody: Use response body content for response analysis phase
 	 -runafter: Command to run after finished encryption (replaces XXX)
          -verbose: Be Verbose
@@ -259,7 +261,13 @@ if ($bruteForce)
 	   else 
 	   {
 		   my $testBytes = chr($b).$testVal;
-		   $testBytes .= "\x00" x ($blockSize-3);
+		   if($#oracleSignatures >= 0 && $randomize) {
+				for (1 .. ($blockSize-3)) {
+					$testBytes .= chr(int(rand(256)));
+				}
+		   } else {
+				$testBytes .= "\x00" x ($blockSize-3);
+			}
 
 		   my $combinedBf = $testBytes;  
 		   $combinedBf .= $encryptedBytes;
