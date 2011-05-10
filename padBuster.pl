@@ -34,6 +34,7 @@ GetOptions( "log" => \my $logFiles,
             "veryverbose" => \my $superVerbose,
             "proxy=s" => \my $proxy,
             "proxyauth=s" => \my $proxyAuth,
+            "cert=s" => \my $cert,
             "noiv" => \my $noIv,
             "auth=s" => \my $auth,
             "resume=s" => \my $resumeBlock,
@@ -80,6 +81,7 @@ Options:
 	 -prefix [Prefix]: Prefix bytes to append to each sample (Encoded) 
 	 -proxy [address:port]: Use HTTP/S Proxy
 	 -proxyauth [username:password]: Proxy Authentication
+	 -cert [pkcs12:file:pass or pem:crt:key]: HTTPS client certificate
 	 -resume [Block Number]: Resume at this block number
 	 -usebody: Use response body content for response analysis phase
 	 -runafter: Command to run after finished encryption (replaces XXX)
@@ -131,6 +133,25 @@ my $totalRequests = 0;
 my $reqsPerSession = 500;
 my $retryWait = 10;
 my $retryRepeat = 20;
+
+if ($cert) {
+	my ($certType, $certFile, $certPass) = split(/:/,$cert);
+	if (lc($certType) eq 'pkcs12') {
+		$ENV{HTTPS_PKCS12_FILE}     = $certFile;
+		if (!$certPass && !$ENV{HTTPS_PKCS12_PASSWORD}) {
+			$certPass = &promptUser("Enter $certType certificate '$certFile' password", "", 2);
+		}
+		if ($certPass) {
+			$ENV{HTTPS_PKCS12_PASSWORD} = $certPass;
+		}
+	} elsif (lc($certType) eq 'pem') {
+		$ENV{HTTPS_CERT_FILE} = $certFile;
+		$ENV{HTTPS_KEY_FILE}  = $certPass;
+	} else {
+		print "\nERROR: Invalid certificate type!";
+		exit();
+	}
+}
 
 # See if the sample needs to be URL decoded, otherwise don't (the plus from B64 will be a problem)
 if ($sample =~ /\%/)
@@ -702,6 +723,21 @@ sub makeRequest {
   if(!$lwp || ($totalRequests % $reqsPerSession) == 0) {
     sleep $retryWait;
     $lwp = LWP::UserAgent->new(env_proxy => 1, keep_alive => 1, timeout => 60, requests_redirectable => []);
+ 
+    if ($proxy)
+    {
+  	  my $proxyUrl = "http://";
+  	  if ($proxyAuth)
+ 	  {
+ 		my ($proxyUser, $proxyPass) = split(":",$proxyAuth);
+ 		$ENV{HTTPS_PROXY_USERNAME} = $proxyUser;
+		$ENV{HTTPS_PROXY_PASSWORD} = $proxyPass;
+		$proxyUrl .= $proxyAuth."@";
+ 	  }
+ 	  $proxyUrl .= $proxy;
+ 	  $lwp->proxy(['http'], "http://".$proxy);
+	  $ENV{HTTPS_PROXY} = "http://".$proxy;
+    }
   }
  
   $req = new HTTP::Request $method => $url;
@@ -713,21 +749,6 @@ sub makeRequest {
    $req->content_type('application/x-www-form-urlencoded');
    $req->content($data);
   }
- 
-  if ($proxy)
-  {
-  	my $proxyUrl = "http://";
-  	if ($proxyAuth)
- 	{
- 		my ($proxyUser, $proxyPass) = split(":",$proxyAuth);
- 		$ENV{HTTPS_PROXY_USERNAME}	= $proxyUser;
-		$ENV{HTTPS_PROXY_PASSWORD}	= $proxyPass;
-		$proxyUrl .= $proxyAuth."@";
- 	}
- 	$proxyUrl .= $proxy;
- 	$lwp->proxy(['http'], "http://".$proxy);
-	$ENV{HTTPS_PROXY} = "http://".$proxy;
-  } 	
 
 
   if ($auth) {
@@ -918,13 +939,13 @@ sub web64Decode {
 
 
 sub promptUser {
- my($prompt, $default, $yn) = @_;
+ my($prompt, $default, $type) = @_;
  my $defaultValue = $default ? "[$default]" : "";
  print "$prompt $defaultValue: ";
  chomp(my $input = <STDIN>);
  
  $input = $input ? $input : $default;
- if ($yn)
+ if ($type == 1)
  {
   if ($input =~ /^y|n|a$/)
   {
@@ -932,9 +953,13 @@ sub promptUser {
   }
   else
   {
-   promptUser($prompt, $default, $yn);
+   promptUser($prompt, $default, $type);
   }
  } 
+ elsif ($type == 2)
+ {
+  return $input;
+ }
  else 
  {
   if ($input =~ /^-?\d/ && $input > 0 && $input < 256)
