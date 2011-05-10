@@ -29,7 +29,7 @@ GetOptions( "log" => \my $logFiles,
             "intermediate=s" => \my $intermediaryInput,
             "ciphertext=s" => \my $cipherInput,
             "plaintext=s" => \my $plainTextInput,
-	    "encodedtext=s" => \my $encodedPlainTextInput,
+            "encodedtext=s" => \my $encodedPlainTextInput,
             "noencode" => \my $noEncodeOption,
             "veryverbose" => \my $superVerbose,
             "proxy=s" => \my $proxy,
@@ -101,6 +101,7 @@ if ($url eq "" || $sample eq "" || $blockSize eq "")
 #$post = "";
 #$sample = "";
 
+my $lwp;
 my $method = $post ? "POST" : "GET";
 
 # These are file related variables
@@ -125,6 +126,8 @@ my $encodingFormat = $encoding ? $encoding : 0;
 
 my $encryptedBytes = $sample;
 my $totalRequests = 0;
+my $reqsPerSession = 200;
+my $retryWait = 10;
 
 # See if the sample needs to be URL decoded, otherwise don't (the plus from B64 will be a problem)
 if ($sample =~ /\%/)
@@ -673,7 +676,7 @@ sub processBlock
 sub makeRequest {
  
  my ($method, $url, $data, $cookie) = @_; 
- my ($noConnect, $numRetries, $lwp, $status, $content, $req, $location, $contentLength);   
+ my ($noConnect, $numRetries, $status, $content, $req, $location, $contentLength);   
 
  $requestTracker++;
  do 
@@ -681,11 +684,10 @@ sub makeRequest {
   #Quick hack to avoid hostname in URL when using a proxy with SSL (this will get re-set later if needed)
   $ENV{HTTPS_PROXY} = "";
   
-  $lwp = LWP::UserAgent->new(env_proxy => 1,
-                            keep_alive => 1,
-                            timeout => 30,
-			    requests_redirectable => [],
-                            );
+  if(!$lwp || ($totalRequests % $reqsPerSession) == 0) {
+    sleep $retryWait;
+    $lwp = LWP::UserAgent->new(env_proxy => 1, keep_alive => 1, timeout => 60, requests_redirectable => []);
+  }
  
   $req = new HTTP::Request $method => $url;
 
@@ -747,31 +749,29 @@ sub makeRequest {
   $status = substr($response->status_line, 0, 3);
   $content = $response->content;
  
-  $superVerbose ? myPrint("Response Content:\n$content",0) : "";
   $location = $response->header("Location");
-  if ($location eq "")
-  {
-   $location = "N/A";
-  }
-  #$contentLength = $response->header("Content-Length");
-  $contentLength = length($content);
+  $contentLength = $response->header("Content-Length");
+  #$contentLength = length($content);
   
   
   my $contentEncoding = $response->header("Content-Encoding");
   if ($contentEncoding =~ /GZIP/i )
   {
-    	$content = Compress::Zlib::memGunzip($content);
+    $content = Compress::Zlib::memGunzip($content);
   	$contentLength = length($content);
   }
+  $superVerbose ? myPrint("Response Content:\n$content",0) : "";
   
   my $statusMsg = $response->status_line;
   #myPrint("Status: $statusMsg, Location: $location, Length: $contentLength",1); 
  
-  if ($statusMsg =~ /Can't connect/) {
-   print "ERROR: $statusMsg\n   Retrying in 10 seconds...\n\n";
+  #eg: Status: 500 Can't connect to example.com:81 (connect: Connection timed out), Location: N/A, Length:
+  #eg: Status: 500 Server closed connection without sending any data back, Location: N/A, Length:
+  if ($location eq '' && $contentLength eq '' && $status eq '500') {
+   print "ERROR: $statusMsg\n   Retrying in $retryWait seconds...\n\n";
    $noConnect = 1;
    $numRetries++;
-   sleep 10;
+   sleep $retryWait;
   } else {
    $noConnect = 0;
    $totalRequests++;
@@ -780,6 +780,9 @@ sub makeRequest {
  if ($numRetries >= 15) {
   myPrint("ERROR: Number of retries has exceeded 15 attempts...quitting.\n",0);
   exit;
+ }
+ if ($location eq "") {
+   $location = "N/A";
  }
  return ($status, $content, $location, $contentLength);
 }
