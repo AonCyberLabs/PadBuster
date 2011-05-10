@@ -128,8 +128,9 @@ my $encodingFormat = $encoding ? $encoding : 0;
 
 my $encryptedBytes = $sample;
 my $totalRequests = 0;
-my $reqsPerSession = 200;
+my $reqsPerSession = 500;
 my $retryWait = 10;
+my $retryRepeat = 20;
 
 # See if the sample needs to be URL decoded, otherwise don't (the plus from B64 will be a problem)
 if ($sample =~ /\%/)
@@ -574,7 +575,7 @@ sub processBlock
 				if (($error && $content !~ /$error/) || ($oracleSignature ne "" && $oracleSignature ne $signatureData))
 				{
 					# This is for autoretry logic (only works on the first byte)
-					if ($autoRetry == 1 &&  ($byteNum == ($blockSize - 1) ) && $hasHit == 0 )
+					if ($autoRetry > 0 &&  ($byteNum == ($blockSize - 1) ) && $hasHit == 0 )
 					{
 						$hasHit++;
 					} 
@@ -592,7 +593,7 @@ sub processBlock
 							$continue = &promptUser("Do you want to use this value (Yes/No/All)? [y/n/a]","",1);
 						}
 
-						if ($continue eq "y" | $continue eq "a")
+						if ($continue eq "y" || $continue eq "a")
 						{
 							$continue eq "a" ? $interactive = 0 : "";
 
@@ -631,10 +632,10 @@ sub processBlock
 					# End of the road with no success.  We should probably try again.
 					myPrint("ERROR: No matching response on [Byte ".($byteNum+1)."]",0);
 
-					if ($autoRetry == 0)
+					if ($autoRetry < $retryRepeat)
 					{
-						$autoRetry = 1;
-						myPrint("       Automatically trying one more time...",0);
+						$autoRetry++;
+						myPrint("       Automatically trying ".($retryRepeat-$autoRetry)." more times...",0);
 						$repeat = 1;
 						last OUTERLOOP;
 						
@@ -752,7 +753,7 @@ sub makeRequest {
   my $endTime = gettimeofday();  
   $timeTracker = $timeTracker + ($endTime - $startTime);
   
-  if ($printStats == 1 && $requestTracker % 250 == 0)
+  if ($printStats == 1 && $requestTracker % 500 == 0)
   {
   	print "[+] $requestTracker Requests Issued (Avg Request Time: ".(sprintf "%.3f", $timeTracker/100).")\n";
   	$timeTracker = 0;
@@ -790,9 +791,9 @@ sub makeRequest {
    $noConnect = 0;
    $totalRequests++;
   }  
- } until (($noConnect == 0) || ($numRetries >= 15));
- if ($numRetries >= 15) {
-  myPrint("ERROR: Number of retries has exceeded 15 attempts...quitting.\n",0);
+ } until (($noConnect == 0) || ($numRetries >= $retryRepeat));
+ if ($numRetries >= $retryRepeat) {
+  myPrint("ERROR: Number of retries has exceeded $retryRepeat attempts...quitting.\n",0);
   exit;
  }
  if ($location eq "") {
