@@ -132,7 +132,7 @@ my $encryptedBytes = $sample;
 my $totalRequests = 0;
 my $reqsPerSession = 500;
 my $retryWait = 10;
-my $retryRepeat = 20;
+my $retryRepeat = 10;
 
 if ($cert) {
 	my ($certType, $certFile, $certPass) = split(/:/,$cert);
@@ -405,7 +405,9 @@ if ($plainTextInput)
 		$runAfter =~ s/XXX/$forgedBytes/g;
 		myPrint("Running: $runAfter",0);
 		myPrint("-------------------------------------------------------\n",0);	
-		system($runAfter);
+		my $ret = system($runAfter);
+		myPrint("-------------------------------------------------------\n",0);	
+		myPrint("Exit $ret from: $runAfter",0);
 	}
 } 
 else
@@ -655,8 +657,9 @@ sub processBlock
 
 					if ($autoRetry < $retryRepeat)
 					{
-						$autoRetry++;
 						myPrint("       Automatically trying ".($retryRepeat-$autoRetry)." more times...",0);
+  						sleep $retryWait;
+						$autoRetry++;
 						$repeat = 1;
 						last OUTERLOOP;
 						
