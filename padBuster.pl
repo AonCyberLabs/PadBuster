@@ -256,7 +256,7 @@ if ($bruteForce)
 	   else 
 	   {
 		   my $testBytes = chr($b).$testVal;
-		   if($#oracleSignatures >= 0 && $randomize) {
+		   if($#oracleSignatures >= 0 && $randomize || $#oracleSignatures < 0 && $printStats) {
 				for (1 .. ($blockSize-3)) {
 					$testBytes .= chr(int(rand(256)));
 				}
@@ -486,11 +486,13 @@ sub determineSignature()
 	} 
 	else 
 	{
-		my @oracleNums = split(/[,\s]+/, &promptUser("\nEnter a comma separated list of IDs that match the error condition\nNOTE: The ID# marked with ** is recommended"));
+		my @oracleNums = split(/[,\s]+/, &promptUser("\nEnter a comma separated list of IDs that match the error condition\nNOTE: The ID# marked with ** is recommended",''));
 		for (@oracleNums) {
 			push(@oracleSignatures, @sortedGuesses[$_-1]);
 		}
-		myPrint("\nContinuing test with selection [@oracleNums]\n",0);
+		if($#oracleSignatures >= 0) {
+			myPrint("\nContinuing test with selection [@oracleNums]\n",0);
+		}
 	}
 }
 
@@ -991,7 +993,7 @@ sub promptUser {
  }
  else 
  {
-  if ($input =~ /^-?\d/ && $input > 0 && $input < 256)
+  if ($input =~ /^-?\d/ && $input > 0 && $input < 256 || $input eq $default)
   {
    return $input;
   } else {
