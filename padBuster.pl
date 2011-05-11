@@ -19,7 +19,7 @@ use Time::HiRes qw( gettimeofday );
 use Compress::Zlib;
 use Crypt::SSLeay;
 
-GetOptions( "log" => \my $logFiles,
+GetOptions( "log:s" => \my $logging,
             "post=s" => \my $post,
             "encoding=s" => \my $encoding,
             "headers=s" => \my $headers,
@@ -74,7 +74,7 @@ Options:
          -headers [HTTP Headers]: Custom Headers (name1::value1;name2::value2)
 	 -interactive: Prompt for confirmation on decrypted bytes
 	 -intermediate [Bytes]: Intermediate Bytes for CipherText (Hex-Encoded)
-	 -log: Generate log files (creates folder PadBuster.DDMMYY)
+	 -log [customdir]: Generate log files (creates PadBuster.DDMMYY or customdir)
 	 -noencode: Do not URL-encode the payload (encoded by default)
 	 -noiv: Sample does not include IV (decrypt first block) 
          -plaintext [String]: Plain-Text to Encrypt
@@ -87,7 +87,7 @@ Options:
 	 -randomize: Randomize brute force attempts (similar to Web.config bruter)
 	 -ignoredistance [Levenshtein distance]: Ignore responses with smaller distance
 	 -usebody: Use response body content for response analysis phase
-	 -runafter: Command to run after finished encryption (replaces XXX)
+	 -runafter [cmd]: Command to run after finished encryption (replaces XXX, YYY)
          -verbose: Be Verbose
          -veryverbose: Be Very Verbose (Debug Only)
          
@@ -112,14 +112,8 @@ my $lwp;
 my $method = $post ? "POST" : "GET";
 
 # These are file related variables
-my $dirName = "PadBuster." . getTime("F");
-my $dirSlash = "/";
-my $dirCmd = "mkdir ";
-if ($ENV{'OS'} =~ /Windows/) {
- $dirSlash = "\\";
- $dirCmd = "md ";
-}
-my $dirExists = 0;
+my $dirName = ($logging) ? $logging : ("PadBuster." . getTime("F"));
+my $dirSlash = ($ENV{'OS'} =~ /Windows/) ? "\\" : "/";
 my $printStats = 0;
 my $requestTracker = 0;
 my $timeTracker = 0;
@@ -304,13 +298,16 @@ if ($bruteForce)
 		   {
 			my $contentRealLength = length($content);
 			my $distance = levenshtein($content, $oracleCandidates{$oracleSignatures[0]});
+			my $strAttempt;
 			if (!$ignoreDistance || $distance > $ignoreDistance) {
 				if ($status >= 300 || $status < 400) {
-					myPrint("\nAttempt $bfAttempts - Status: $status - Content Length: $contentLength ($contentRealLength) - Distance: $distance - Location: $location\n$testUrl\n",0);
+					$strAttempt = "Attempt $bfAttempts - Status: $status - Content Length: $contentLength ($contentRealLength) - Distance: $distance - Location: $location\n$testUrl\n";
 				} else {
-					myPrint("\nAttempt $bfAttempts - Status: $status - Content Length: $contentLength ($contentRealLength) - Distance: $distance\n$testUrl\n",0);
+					$strAttempt = "Attempt $bfAttempts - Status: $status - Content Length: $contentLength ($contentRealLength) - Distance: $distance\n$testUrl\n";
 				}
 			}
+			myPrint($strAttempt,0);
+			writeFile("Summary.txt", "# $strAttempt");
 			writeFile("Brute_Force_Attempt_".$bfAttempts.".txt", "URL: $testUrl\nPost Data: $testPost\nCookies: $testCookies\n\nStatus: $status\nLocation: $location\nContent-Length: $contentLength ($contentRealLength)\nDistance: $distance\nContent:\n$content");
 		   }
 	   }
@@ -420,6 +417,7 @@ if ($plainTextInput)
 	if($runAfter) {
 		myPrint("-------------------------------------------------------\n",0);	
 		$runAfter =~ s/XXX/$forgedBytes/g;
+		$runAfter =~ s/YYY/$dirName/g;
 		open FILE, "<", "/proc/$$/cmdline";
 		my $cmdline = <FILE>;
 		$cmdline =~ s/\x00/ '/;
@@ -428,6 +426,8 @@ if ($plainTextInput)
 		close FILE;
 		myPrint("Pri: $cmdline",0);
 		myPrint("Run: $runAfter",0);
+		writeFile("Summary.txt", "\n$cmdline\n");
+		writeFile("Summary.txt", "$runAfter\n\n");
 		myPrint("-------------------------------------------------------\n",0);	
 		my $ret = system($runAfter);
 		myPrint("-------------------------------------------------------\n",0);	
@@ -1003,13 +1003,9 @@ sub promptUser {
 sub writeFile
 {
  my ($fileName, $fileContent) = @_;
- if ($logFiles)
+ if (defined($logging))
  {
-  if ($dirExists != 1)
-  {
-   system($dirCmd." ".$dirName);
-   $dirExists = 1;
-  }
+  mkdir($dirName);
   $fileName = $dirName.$dirSlash.$fileName;
   open(OUTFILE, ">>$fileName") or die "ERROR: Can't write to file $fileName\n";
   print OUTFILE $fileContent;
