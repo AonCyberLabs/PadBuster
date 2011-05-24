@@ -127,7 +127,7 @@ my $encodingFormat = $encoding ? $encoding : 0;
 
 my $encryptedBytes = $sample;
 my $totalRequests = 0;
-my $reqsPerSession = 500;
+my $reqsPerSession = 1000;
 my $retryWait = 10;
 my $retryRepeat = 10;
 
@@ -299,15 +299,15 @@ if ($bruteForce)
 			my $contentRealLength = length($content);
 			my $distance = levenshtein($content, $oracleCandidates{$oracleSignatures[0]});
 			my $strAttempt;
-			if (!$ignoreDistance || $distance > $ignoreDistance) {
-				if ($status >= 300 || $status < 400) {
-					$strAttempt = "Attempt $bfAttempts - Status: $status - Content Length: $contentLength ($contentRealLength) - Distance: $distance - Location: $location\n$testUrl\n";
-				} else {
-					$strAttempt = "Attempt $bfAttempts - Status: $status - Content Length: $contentLength ($contentRealLength) - Distance: $distance\n$testUrl\n";
-				}
+			if ($status >= 300 || $status < 400) {
+				$strAttempt = "Attempt $bfAttempts - Status: $status - Content Length: $contentLength ($contentRealLength) - Distance: $distance - Location: $location\n$testUrl\n";
+			} else {
+				$strAttempt = "Attempt $bfAttempts - Status: $status - Content Length: $contentLength ($contentRealLength) - Distance: $distance\n$testUrl\n";
 			}
-			myPrint($strAttempt,0);
-			writeFile("Summary.txt", "# $strAttempt");
+			if (!$ignoreDistance || $distance > $ignoreDistance) {
+				myPrint($strAttempt,0);
+				writeFile("Summary.txt", "# $strAttempt");
+			}
 			writeFile("Brute_Force_Attempt_".$bfAttempts.".txt", "URL: $testUrl\nPost Data: $testPost\nCookies: $testCookies\n\nStatus: $status\nLocation: $location\nContent-Length: $contentLength ($contentRealLength)\nDistance: $distance\nContent:\n$content");
 		   }
 	   }
@@ -838,6 +838,7 @@ sub makeRequest {
    print "ERROR: $statusMsg\n   Retrying in $retryWait seconds...\n\n";
    $noConnect = 1;
    $numRetries++;
+   $lwp = undef;
    sleep $retryWait;
   } else {
    $noConnect = 0;
