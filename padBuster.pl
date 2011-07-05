@@ -117,8 +117,7 @@ my $url = $ARGV[0];
 my $sample = $ARGV[1];
 my $blockSize = $ARGV[2];
 
-if ($url eq "" || $sample eq "" || $blockSize eq "")
-{
+if ($url eq "" || $sample eq "" || $blockSize eq "") {
 	print "\nERROR: The URL, EncryptedSample and BlockSize cannot be null.\n";
 	exit();
 }
@@ -373,7 +372,7 @@ if ($plainTextInput) {
 }
 &myPrint("-------------------------------------------------------\n",0);	
 
-sub determineSignature() { 
+sub determineSignature { 
 	# Help the user detect the oracle response if an error string was not provided
 	# This logic will automatically suggest the response pattern that occured most often 
 	# during the test as this is the most likeley one
@@ -861,9 +860,9 @@ sub writeFile {
    $dirExists = 1;
   }
   $fileName = $dirName.$dirSlash.$fileName;
-  open(OUTFILE, ">>$fileName") or die "ERROR: Can't write to file $fileName\n";
-  print OUTFILE $fileContent;
-  close(OUTFILE);
+  open(my $OUTFILE, '>>', $fileName) or die "ERROR: Can't write to file $fileName\n";
+  print $OUTFILE $fileContent;
+  close($OUTFILE);
  }
 }
 
