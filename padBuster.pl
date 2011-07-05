@@ -593,7 +593,7 @@ sub processBlock
 					{
 						# If there was no padding error, then it worked
 						&myPrint("[+] Success: (".abs($i-256)."/256) [Byte ".($byteNum+1)."]",0);
-						&myPrint("[+] Test Byte:".uri_escape(substr($testBytes, $byteNum, 1)),1);
+						&myPrint("[+] Test Byte:".&uri_escape(substr($testBytes, $byteNum, 1)),1);
 						
 						# If continually getting a hit on attempt zero, then something is probably wrong
 						$falsePositiveDetector++ if ($i == 255);
@@ -703,6 +703,8 @@ sub makeRequest {
  my ($method, $url, $data, $cookie) = @_; 
  my ($noConnect, $lwp, $status, $content, $req, $location, $contentLength);   
  my $numRetries = 0;
+$data ='' unless $data;
+ $cookie='' unless $cookie;
 
  $requestTracker++;
  do 
@@ -718,7 +720,7 @@ sub makeRequest {
  
   $req = new HTTP::Request $method => $url;
 
-  &myPrint("Request:\n$method\n$url\n$data\n$cookie") if $superVerbose;
+  &myPrint("Request:\n$method\n$url\n$data\n$cookie",0) if $superVerbose;
   
   # Add request content for POST and PUTS 
   if ($data) {
@@ -778,8 +780,7 @@ sub makeRequest {
  
   &myPrint("Response Content:\n$content",0) if $superVerbose;
   $location = $response->header("Location");
-  if ($location eq "")
-  {
+  if (!$location)   {
    $location = "N/A";
   }
   #$contentLength = $response->header("Content-Length");
@@ -816,7 +817,7 @@ sub makeRequest {
  
 sub myPrint {
  my ($printData, $printLevel) = @_;
- $printData = $printData."\n";
+ $printData .= "\n";
  if (($verbose && $printLevel > 0) || $printLevel < 1 || $superVerbose)
  {
   print $printData;
