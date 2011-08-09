@@ -1,12 +1,13 @@
 #!/usr/bin/perl
 #
-# PadBuster v0.3.1 - Automated script for performing Padding Oracle attacks
+# PadBuster v0.3.2 - Automated script for performing Padding Oracle attacks
 # Brian Holyfield - Gotham Digital Science (labs@gdssecurity.com)
 #
 # Credits to J.Rizzo and T.Duong for providing proof of concept web exploit
 # techniques and S.Vaudenay for initial discovery of the attack. Credits also
 # to James M. Martin (research@esptl.com) for sharing proof of concept exploit
-# code for performing various brute force attack techniques.
+# code for performing various brute force attack techniques, and wireghoul (Eldar 
+# Marcussen) for making code quality improvements.  
 # 
 
 use LWP::UserAgent;
