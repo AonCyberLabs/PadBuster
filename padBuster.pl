@@ -71,7 +71,7 @@ GetOptions( "log" => \$logFiles,
             "verbose" => \$verbose);
   
 print "\n+-------------------------------------------+\n";
-print "| PadBuster - v0.3.1                        |\n";
+print "| PadBuster - v0.3.2                        |\n";
 print "| Brian Holyfield - Gotham Digital Science  |\n";
 print "| labs\@gdssecurity.com                      |\n";
 print "+-------------------------------------------+\n";
