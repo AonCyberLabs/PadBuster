@@ -1,6 +1,6 @@
 #!/usr/bin/perl
 #
-# PadBuster v0.3.2 - Automated script for performing Padding Oracle attacks
+# PadBuster v0.3.3 - Automated script for performing Padding Oracle attacks
 # Brian Holyfield - Gotham Digital Science (labs@gdssecurity.com)
 #
 # Credits to J.Rizzo and T.Duong for providing proof of concept web exploit
@@ -40,7 +40,7 @@ my $proxyAuth;
 my $noIv;
 my $auth;
 my $resumeBlock;
-my $interactive;
+my $interactive = 0;
 my $bruteForce;
 my $ignoreContent;
 my $useBody;
@@ -71,7 +71,7 @@ GetOptions( "log" => \$logFiles,
             "verbose" => \$verbose);
   
 print "\n+-------------------------------------------+\n";
-print "| PadBuster - v0.3.2                        |\n";
+print "| PadBuster - v0.3.3                        |\n";
 print "| Brian Holyfield - Gotham Digital Science  |\n";
 print "| labs\@gdssecurity.com                      |\n";
 print "+-------------------------------------------+\n";
