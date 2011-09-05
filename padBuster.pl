@@ -6,7 +6,8 @@
 # Credits to J.Rizzo and T.Duong for providing proof of concept web exploit
 # techniques and S.Vaudenay for initial discovery of the attack. Credits also
 # to James M. Martin (research@esptl.com) for sharing proof of concept exploit
-# code for performing various brute force attack techniques.
+# code for performing various brute force attack techniques. Credits for variuos
+# improvements to GW (gw.2011@tnode.com or http://gw.tnode.com/) - Viris.
 # 
 
 use LWP::UserAgent;
