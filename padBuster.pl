@@ -21,6 +21,8 @@ use Getopt::Long;
 use Time::HiRes qw( gettimeofday );
 use Compress::Zlib;
 use Crypt::SSLeay;
+use File::Basename qw(dirname);
+use File::Path qw(make_path);
 
 # Set defaults with $variable = value
 my $logging;
@@ -341,6 +343,7 @@ if ($bruteForce) {
 					if (!(($filename =~ s/#ATT/$bfAttempts/g) | ($filename =~ s/#STAT/$status/g) | ($filename =~ s/#SUM/$chksum/g))) {
 						goto ENDBFLOOP;  # Finish after storing to a static filename
 					}
+					make_path(dirname($filename));
 					open(OUTFILE, ">$filename") or die "ERROR: Can't write to file $filename\n";
 					print OUTFILE $content;
 					close(OUTFILE);
@@ -443,15 +446,16 @@ if ($plainTextInput) {
 		&myPrint("-------------------------------------------------------\n",0);	
 		$runAfter =~ s/XXX/$forgedBytes/g;
 		$runAfter =~ s/YYY/$dirName/g;
-		open FILE, "<", "/proc/$$/cmdline";
-		my $cmdline = <FILE>;
-		$cmdline =~ s/\x00/ '/;
-		$cmdline =~ s/\x00/' '/g;
-		$cmdline =~ s/ '$//;
-		close FILE;
-		&myPrint("Pri: $cmdline",0);
+		if (open(FILE, "<", "/proc/$$/cmdline")) {
+			my $cmdline = <FILE>;
+			$cmdline =~ s/\x00/ '/;
+			$cmdline =~ s/\x00/' '/g;
+			$cmdline =~ s/ '$//;
+			close(FILE);
+			&myPrint("Pri: $cmdline",0);
+			&writeFile("Summary.txt", "\n$cmdline\n");
+		}
 		&myPrint("Run: $runAfter",0);
-		&writeFile("Summary.txt", "\n$cmdline\n");
 		&writeFile("Summary.txt", "$runAfter\n\n");
 		&myPrint("-------------------------------------------------------\n",0);	
 		my $ret = system($runAfter);
@@ -970,8 +974,8 @@ sub promptUser {
 sub writeFile {
  my ($fileName, $fileContent) = @_;
  if (defined($logging)) {
-  mkdir($dirName);
   $fileName = $dirName.$dirSlash.$fileName;
+  make_path(dirname($fileName));
   open(my $OUTFILE, ">>$fileName") or die "ERROR: Can't write to file $fileName\n";
   print $OUTFILE $fileContent;
   close($OUTFILE);
