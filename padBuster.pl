@@ -151,7 +151,7 @@ my $method = $post ? "POST" : "GET";
 
 # These are file related variables
 my $dirName = ($logging) ? $logging : ("PadBuster." . &getTime("F"));
-my $dirSlash = ($ENV{'OS'} =~ /Windows/) ? "\\" : "/";
+my $dirSlash = (defined($ENV{'OS'}) && $ENV{'OS'} =~ /Windows/) ? "\\" : "/";
 my $printStats = 0;
 my $requestTracker = 0;
 my $timeTracker = 0;
@@ -167,6 +167,7 @@ my $totalRequests = 0;
 my $reqsPerSession = 1000;
 my $retryWait = 10;
 my $retryRepeat = 10;
+my $repeatAutoAnalysis = 5;
 
 if ($cert) {
 	my ($certType, $certFile, $certPass) = split(/:/,$cert);
@@ -311,7 +312,7 @@ if ($bruteForce) {
 			$oracleCandidates{$signatureData} = $content;
 			$responseFileBuffer{$signatureData} = "Status: $status\nLocation: $location\nContent-Length: $contentLength\nContent:\n$content";
 			if ($b == 255) {
-				if (!$auto || $printStats > 4) {
+				if (!$auto || $printStats >= $repeatAutoAnalysis) {
 					&myPrint("*** Response Analysis Complete ***\n",0);
 					&determineSignature();
 				}
@@ -445,7 +446,7 @@ if ($plainTextInput) {
 		open FILE, "<", "/proc/$$/cmdline";
 		my $cmdline = <FILE>;
 		$cmdline =~ s/\x00/ '/;
-		$cmdline =~ s/\x00/' '/cg;
+		$cmdline =~ s/\x00/' '/g;
 		$cmdline =~ s/ '$//;
 		close FILE;
 		&myPrint("Pri: $cmdline",0);
@@ -457,7 +458,7 @@ if ($plainTextInput) {
 		&myPrint("-------------------------------------------------------\n",0);	
 		&myPrint("Exit $ret from: $runAfter",0);
 	}
-} else {	
+} elsif (defined($plainTextBytes)) {	
 	&myPrint("[+] Decrypted value (ASCII): $plainTextBytes\n",0);
 	&myPrint("[+] Decrypted value (HEX): ".&myEncode($plainTextBytes,2)."\n", 0);
 	&myPrint("[+] Decrypted value (Base64): ".&myEncode($plainTextBytes,0)."\n", 0);
@@ -511,7 +512,7 @@ sub determineSignature {
 		    @oracleNums =split(/[,\s]+/, &promptUser("\nEnter a comma separated list of IDs that match the error condition\nNOTE: The ID# marked with ** is recommended",''));
 		}
 		for (@oracleNums) {
-			push(@oracleSignatures, @sortedGuesses[$_-1]);
+			push(@oracleSignatures, $sortedGuesses[$_-1]);
 		}
 		if($#oracleSignatures >= 0) {
 			&myPrint("\nContinuing test with selection [@oracleNums]\n",0);
@@ -827,7 +828,7 @@ sub makeRequest {
  
   #eg: Status: 500 Can't connect to example.com:81 (connect: Connection timed out), Location: N/A, Length:
   #eg: Status: 500 Server closed connection without sending any data back, Location: N/A, Length:
-  if ($location eq '' && $contentLength eq '' && $status eq '500') {
+  if (!defined($location) && !defined($contentLength) && $status eq '500') {
    print "ERROR: $statusMsg\n   Retrying in $retryWait seconds...\n\n";
    $noConnect = 1;
    $numRetries++;
@@ -943,6 +944,7 @@ sub web64Decode {
 
 sub promptUser {
  my($prompt, $default, $type) = @_;
+ $type = -1  if(!defined($type));
  my $defaultValue = $default ? "[$default]" : "";
  print "$prompt $defaultValue: ";
  chomp(my $input = <STDIN>);
