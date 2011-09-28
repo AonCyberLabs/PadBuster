@@ -128,7 +128,7 @@ Options:
 	 -usebody: Use response body content for response analysis phase
 	 -auto [maxrequests]: Automatic decision making and stopping after maxrequests
 	 -autostore [fileprefix]: Automatic storing to files (replaces #ATT, #STAT, #SUM)
-	 -runafter [cmd]: Command to run after finished encryption (replaces XXX, YYY)
+	 -runafter [cmd]: Command to run after finished encryption (replaces #ENC, #DIR)
          -verbose: Be Verbose
          -veryverbose: Be Very Verbose (Debug Only)
          
@@ -445,8 +445,8 @@ if ($plainTextInput) {
 
 	if($runAfter) {
 		&myPrint("-------------------------------------------------------\n",0);	
-		$runAfter =~ s/XXX/$forgedBytes/g;
-		$runAfter =~ s/YYY/$dirName/g;
+		$runAfter =~ s/#ENC/$forgedBytes/g;
+		$runAfter =~ s/#DIR/$dirName/g;
 		if (open(FILE, "<", "/proc/$$/cmdline")) {
 			my $cmdline = <FILE>;
 			$cmdline =~ s/\x00/ '/;
