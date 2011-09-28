@@ -13,5 +13,8 @@ provides the capability to decrypt arbitrary ciphertext, encrypt arbitrary plain
 and perform automated response analysis to determine whether a request is vulnerable 
 to padding oracle attacks.
 
+autoBuster.sh is a script for automatic resource path encoding, bruteforcing and
+file downloading by GW (gw.2011@tnode.com or http://gw.tnode.com/) - Viris.
+
 PadBuster is released under the Reciprocal Public License 1.5 (RPL1.5)
 http://www.opensource.org/licenses/rpl1.5
