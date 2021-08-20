@@ -19,7 +19,6 @@ use URI::Escape;
 use Getopt::Long;
 use Time::HiRes qw( gettimeofday );
 use Compress::Zlib;
-use Crypt::SSLeay;
 
 # Set defaults with $variable = value
 my $logFiles;
