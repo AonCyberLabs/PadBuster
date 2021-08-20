@@ -637,9 +637,11 @@ sub makeRequest {
  do {
   #Quick hack to avoid hostname in URL when using a proxy with SSL (this will get re-set later if needed)
   $ENV{HTTPS_PROXY} = "";
+  $ENV{PERL_LWP_SSL_VERIFY_HOSTNAME} = 0;
   
   $lwp = LWP::UserAgent->new(env_proxy => 1,
                             keep_alive => 1,
+			    ssl_opts => { SSL_verify_mode => 0 },
                             timeout => 30,
 			    requests_redirectable => [],
                             );
