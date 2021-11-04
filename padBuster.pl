@@ -175,7 +175,7 @@ if ($noIv && !$bruteForce && !$plainTextInput) {
 }
 
 # PlainTextBytes is where the complete decrypted sample will be stored (decrypt only)
-my $plainTextBytes;
+my $plainTextBytes = "";
 
 # This is a bool to make sure we know where to replace the sample string
 my $wasSampleFound = 0;
